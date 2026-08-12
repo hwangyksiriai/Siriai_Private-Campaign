@@ -8,11 +8,18 @@
  * (컬럼명도 siriai-admin의 applications / influencers / submissions 테이블과 맞췄어요.)
  */
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { randomUUID } from "crypto";
 import { encryptRRN, decryptRRN } from "./rrnCrypto";
 
-const DB_PATH = path.join(process.cwd(), ".data", "portal-db.json");
+// Vercel 서버리스 함수는 프로젝트 디렉터리가 읽기 전용이라 /tmp에만 쓸 수 있어요.
+// ⚠️ /tmp는 인스턴스마다 별도이고 콜드스타트 시 초기화되는 휘발성 저장소라
+// 데모/구조 확인용일 뿐 실제 운영 데이터로는 쓸 수 없어요 — 진짜 서비스에는
+// siriai-admin과 같은 Postgres(DATABASE_URL) 연동이 필요합니다.
+const DB_PATH = process.env.VERCEL
+  ? path.join(os.tmpdir(), "siriai-portal-db.json")
+  : path.join(process.cwd(), ".data", "portal-db.json");
 
 export type CampaignSection = "ongoing" | "new";
 
