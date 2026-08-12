@@ -16,7 +16,8 @@ export default function CampaignCard({
 }) {
   // 마운트 시점 한 번만 계산 — lazy initializer는 렌더 중 impure 호출이 허용되는 위치
   const [now] = useState(() => Date.now());
-  const dday = campaign.applyEnd ? Math.max(0, Math.round((+new Date(campaign.applyEnd) - now) / 86400000)) : null;
+  const dday = campaign.applyEnd ? Math.round((+new Date(campaign.applyEnd) - now) / 86400000) : null;
+  const expired = dday !== null && dday < 0;
 
   return (
     <article className="flex flex-col justify-between rounded-3xl border border-[var(--line)] bg-[var(--paper)] p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_20px_40px_-24px_rgba(38,34,28,0.2)]">
@@ -48,14 +49,14 @@ export default function CampaignCard({
 
       <div className="mt-8 flex items-center justify-between border-t border-[var(--line)] pt-5">
         <span className="text-xs text-[var(--ink-soft)]">
-          {dday !== null ? `신청 마감 D-${dday}` : "상시 모집"}
+          {dday === null ? "상시 모집" : expired ? "신청이 마감되었습니다" : `신청 마감 D-${dday}`}
         </span>
         <button
           onClick={onApply}
-          disabled={applied || applying}
+          disabled={applied || applying || expired}
           className="rounded-full bg-[var(--ink)] px-4 py-2 text-xs font-medium text-[var(--paper)] transition-colors duration-300 hover:bg-[var(--accent)] disabled:cursor-not-allowed disabled:bg-[var(--ink-soft)]/40"
         >
-          {applied ? "신청완료" : applying ? "신청 중…" : "신청하기 →"}
+          {expired ? "마감" : applied ? "신청완료" : applying ? "신청 중…" : "신청하기 →"}
         </button>
       </div>
     </article>

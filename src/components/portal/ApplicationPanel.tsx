@@ -126,7 +126,12 @@ export default function ApplicationPanel({
           {STATUS_LABEL[application.status]}
         </span>
       </div>
-      {campaign && <p className="mb-5 text-sm text-[var(--ink-soft)]">{campaign.brand} · {campaign.product}</p>}
+      {campaign && (
+        <p className="mb-5 text-sm text-[var(--ink-soft)]">
+          {campaign.brand}
+          {campaign.product && ` · ${campaign.product}`}
+        </p>
+      )}
 
       {application.status === "selected" && (
         <div className="space-y-5 border-t border-[var(--line)] pt-5">

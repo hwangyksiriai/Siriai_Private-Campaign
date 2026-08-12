@@ -1,25 +1,16 @@
 /**
- * 개발용 로컬 데이터 저장소 (JSON 파일 기반).
+ * siriai-admin과 같은 Postgres DB(DATABASE_URL)에 직접 붙는 데이터 계층.
+ * 테이블/컬럼은 admin과 100% 공유 — 여기서 만든 신청/콘텐츠/정산은
+ * 별도 동기화 없이 admin 화면에 바로 나타나요.
  *
- * ⚠️ 이 파일은 "전체 구조"를 보여주기 위한 임시 구현이에요.
- * 실제 서비스에서는 siriai-admin과 같은 Postgres(DATABASE_URL)를 붙이는 걸 권장해요 —
- * 그때는 이 파일의 함수 시그니처만 그대로 유지한 채 내부 구현을 adminDb() 쿼리로
- * 바꾸면 나머지 API 라우트/페이지 코드는 손댈 필요가 없도록 설계했습니다.
- * (컬럼명도 siriai-admin의 applications / influencers / submissions 테이블과 맞췄어요.)
+ * 이 포털 전용으로 추가한 컬럼/테이블 (additive migration, 기존 데이터 영향 없음):
+ *   - influencers.portal_code        (개인 초대 코드, unique)
+ *   - campaigns.hub_visible          (포털에 노출할지, 기본 false — admin에서 켜야 노출)
+ *   - campaigns.hub_is_new           (신규 캠페인 섹션 여부, 기본 false)
+ *   - portal_access_logs             (코드 방문 기록, 내부 트래킹 전용)
  */
-import fs from "fs";
-import os from "os";
-import path from "path";
-import { randomUUID } from "crypto";
-import { encryptRRN, decryptRRN } from "./rrnCrypto";
-
-// Vercel 서버리스 함수는 프로젝트 디렉터리가 읽기 전용이라 /tmp에만 쓸 수 있어요.
-// ⚠️ /tmp는 인스턴스마다 별도이고 콜드스타트 시 초기화되는 휘발성 저장소라
-// 데모/구조 확인용일 뿐 실제 운영 데이터로는 쓸 수 없어요 — 진짜 서비스에는
-// siriai-admin과 같은 Postgres(DATABASE_URL) 연동이 필요합니다.
-const DB_PATH = process.env.VERCEL
-  ? path.join(os.tmpdir(), "siriai-portal-db.json")
-  : path.join(process.cwd(), ".data", "portal-db.json");
+import { adminDb } from "./adminDb";
+import { encryptRRN } from "./rrnCrypto";
 
 export type CampaignSection = "ongoing" | "new";
 
@@ -31,16 +22,15 @@ export type Campaign = {
   title: string;
   product: string;
   hashtags: string[];
-  applyEnd: string | null; // ISO date
+  applyEnd: string | null;
   section: CampaignSection;
 };
 
 export type Influencer = {
   id: string;
   name: string;
-  phone: string;
+  phone: string | null;
   instagramHandle: string;
-  code: string;
 };
 
 export type ApplicationStatus = "applied" | "selected" | "rejected";
@@ -59,315 +49,214 @@ export type Application = {
   settleBankName: string | null;
   settleBankAccount: string | null;
   settleHolder: string | null;
-  settleRrn: string | null; // encrypted
+  settleRrn: string | null;
 };
 
-export type SecureProfile = {
-  influencerId: string;
-  realName: string;
-  phone: string;
-  bankName: string;
-  bankAccount: string;
-  holder: string;
-  rrn: string; // encrypted
-  updatedAt: string;
-};
-
-export type AccessLog = {
-  id: string;
-  influencerId: string;
-  code: string;
-  accessedAt: string;
-};
-
-type Db = {
-  influencers: Influencer[];
-  campaigns: Campaign[];
-  applications: Application[];
-  secureProfiles: SecureProfile[];
-  accessLogs: AccessLog[];
-};
-
-function seed(): Db {
-  const influencers: Influencer[] = [
-    { id: "inf_1", name: "김유나", phone: "010-1234-5678", instagramHandle: "@yuna_beauty", code: "YUNA2026" },
-    { id: "inf_2", name: "박서준", phone: "010-2222-3333", instagramHandle: "@seojun.log", code: "SEOJUN01" },
-    { id: "inf_3", name: "이하은", phone: "010-9999-8888", instagramHandle: "@haeun.daily", code: "HAEUN99" },
-  ];
-
-  const campaigns: Campaign[] = [
-    {
-      id: "c1",
-      brand: "라니에르",
-      category: "스킨케어",
-      channels: ["Instagram", "YouTube"],
-      title: "라니에르 9월 세라마이드 앰플 무상 협업",
-      product: "세라마이드 리페어 앰플 30ml",
-      hashtags: ["#라니에르", "#세라마이드", "#수분앰플", "#피부장벽"],
-      applyEnd: addDays(7),
-      section: "ongoing",
-    },
-    {
-      id: "c2",
-      brand: "볕뜰",
-      category: "선케어",
-      channels: ["Instagram", "YouTube", "TikTok"],
-      title: "볕뜰 무기자차 선스틱 2종 기획 협업",
-      product: "미네랄 선스틱 SPF50+ 2종",
-      hashtags: ["#볕뜰", "#무기자차", "#선스틱", "#자외선차단"],
-      applyEnd: addDays(3),
-      section: "ongoing",
-    },
-    {
-      id: "c3",
-      brand: "결",
-      category: "헤어케어",
-      channels: ["Instagram", "YouTube"],
-      title: "결 두피 스케일링 샴푸 무상 협업",
-      product: "두피 스케일링 샴푸 500ml",
-      hashtags: ["#결헤어", "#두피케어", "#탈모샴푸"],
-      applyEnd: addDays(10),
-      section: "ongoing",
-    },
-    {
-      id: "c4",
-      brand: "무이",
-      category: "홈프래그런스",
-      channels: ["Instagram"],
-      title: "무이 가을 우드 디퓨저 신제품 시딩",
-      product: "우드머스크 리드 디퓨저 200ml",
-      hashtags: ["#무이", "#디퓨저", "#가을향"],
-      applyEnd: addDays(5),
-      section: "new",
-    },
-    {
-      id: "c5",
-      brand: "소반",
-      category: "푸드",
-      channels: ["Instagram", "TikTok"],
-      title: "소반 저당 그래놀라 3종 체험단",
-      product: "저당 그래놀라 오리지널/초코/베리",
-      hashtags: ["#소반", "#저당간식", "#그래놀라"],
-      applyEnd: addDays(9),
-      section: "new",
-    },
-  ];
-
-  const applications: Application[] = [
-    {
-      id: "app_1",
-      influencerId: "inf_1",
-      campaignId: "c1",
-      status: "selected",
-      createdAt: addDays(-6),
-      contentUrl: null,
-      contentSubmittedAt: null,
-      settleSubmittedAt: null,
-      settleRealName: null,
-      settlePhone: null,
-      settleBankName: null,
-      settleBankAccount: null,
-      settleHolder: null,
-      settleRrn: null,
-    },
-    {
-      id: "app_2",
-      influencerId: "inf_2",
-      campaignId: "c2",
-      status: "applied",
-      createdAt: addDays(-1),
-      contentUrl: null,
-      contentSubmittedAt: null,
-      settleSubmittedAt: null,
-      settleRealName: null,
-      settlePhone: null,
-      settleBankName: null,
-      settleBankAccount: null,
-      settleHolder: null,
-      settleRrn: null,
-    },
-  ];
-
-  // 김유나는 예전 캠페인에서 이미 정산정보를 한 번 제출한 적이 있다고 가정 (재사용 프롬프트 데모)
-  const secureProfiles: SecureProfile[] = [
-    {
-      influencerId: "inf_1",
-      realName: "김유나",
-      phone: "010-1234-5678",
-      bankName: "국민은행",
-      bankAccount: "123456-78-901234",
-      holder: "김유나",
-      rrn: encryptRRN("9501011234567"),
-      updatedAt: addDays(-40),
-    },
-  ];
-
-  return { influencers, campaigns, applications, secureProfiles, accessLogs: [] };
+// DB의 실제 상태값(pending/in_progress/그 외)을 포털 UI 상태로 매핑
+function toUiStatus(dbStatus: string): ApplicationStatus {
+  if (dbStatus === "pending") return "applied";
+  if (dbStatus === "in_progress") return "selected";
+  return "rejected";
 }
 
-function addDays(n: number): string {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + n);
-  return d.toISOString();
-}
-
-function readDb(): Db {
-  try {
-    const raw = fs.readFileSync(DB_PATH, "utf-8");
-    return JSON.parse(raw) as Db;
-  } catch {
-    const db = seed();
-    writeDb(db);
-    return db;
-  }
-}
-
-function writeDb(db: Db) {
-  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-  fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), "utf-8");
-}
-
-export function getInfluencerByCode(code: string): Influencer | null {
-  const db = readDb();
-  return db.influencers.find((i) => i.code.toLowerCase() === code.trim().toLowerCase()) || null;
-}
-
-export function logAccess(influencerId: string, code: string): { visitCount: number } {
-  const db = readDb();
-  db.accessLogs.push({ id: randomUUID(), influencerId, code, accessedAt: new Date().toISOString() });
-  writeDb(db);
-  return { visitCount: db.accessLogs.filter((l) => l.influencerId === influencerId).length };
-}
-
-export function getVisitCount(influencerId: string): number {
-  const db = readDb();
-  return db.accessLogs.filter((l) => l.influencerId === influencerId).length;
-}
-
-export function listCampaigns(): { ongoing: Campaign[]; new: Campaign[] } {
-  const db = readDb();
+function mapApplicationRow(r: Record<string, unknown>): Application {
   return {
-    ongoing: db.campaigns.filter((c) => c.section === "ongoing"),
-    new: db.campaigns.filter((c) => c.section === "new"),
+    id: r.id as string,
+    influencerId: r.influencer_id as string,
+    campaignId: r.campaign_id as string,
+    status: toUiStatus(r.status as string),
+    createdAt: (r.created_at as Date).toISOString(),
+    contentUrl: (r.content_url as string) ?? null,
+    contentSubmittedAt: r.content_submitted_at ? (r.content_submitted_at as Date).toISOString() : null,
+    settleSubmittedAt: r.settle_submitted_at ? (r.settle_submitted_at as Date).toISOString() : null,
+    settleRealName: (r.settle_real_name as string) ?? null,
+    settlePhone: (r.settle_phone as string) ?? null,
+    settleBankName: (r.settle_bank_name as string) ?? null,
+    settleBankAccount: (r.settle_bank_account as string) ?? null,
+    settleHolder: (r.settle_holder as string) ?? null,
+    settleRrn: (r.settle_rrn as string) ?? null,
   };
 }
 
-export function listApplicationsForInfluencer(influencerId: string): Application[] {
-  const db = readDb();
-  return db.applications
-    .filter((a) => a.influencerId === influencerId)
-    .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+export async function getInfluencerByCode(code: string): Promise<Influencer | null> {
+  const { rows } = await adminDb().query(
+    `SELECT id, name, phone, handle FROM influencers WHERE lower(portal_code) = lower($1) LIMIT 1`,
+    [code.trim()]
+  );
+  if (!rows.length) return null;
+  const r = rows[0];
+  return { id: r.id, name: r.name, phone: r.phone, instagramHandle: r.handle ? `@${r.handle}` : "" };
 }
 
-export function createApplication(influencerId: string, campaignId: string): Application {
-  const db = readDb();
-  const existing = db.applications.find((a) => a.influencerId === influencerId && a.campaignId === campaignId);
-  if (existing) return existing;
-  const app: Application = {
-    id: `app_${randomUUID().slice(0, 8)}`,
+export async function logAccess(influencerId: string, code: string): Promise<void> {
+  await adminDb().query(`INSERT INTO portal_access_logs (influencer_id, code) VALUES ($1, $2)`, [
     influencerId,
-    campaignId,
-    status: "applied",
-    createdAt: new Date().toISOString(),
-    contentUrl: null,
-    contentSubmittedAt: null,
-    settleSubmittedAt: null,
-    settleRealName: null,
-    settlePhone: null,
-    settleBankName: null,
-    settleBankAccount: null,
-    settleHolder: null,
-    settleRrn: null,
+    code,
+  ]);
+}
+
+export async function listCampaigns(): Promise<{ ongoing: Campaign[]; new: Campaign[] }> {
+  const { rows } = await adminDb().query(`
+    SELECT c.id, c.name, c.content_type, c.category, c.hashtags, c.product_name,
+           c.timeline_apply_end, c.hub_is_new, b.name AS brand_name
+      FROM campaigns c
+      LEFT JOIN brands b ON b.id = c.brand_id
+     WHERE c.hub_visible = true
+     ORDER BY c.created_at DESC
+  `);
+
+  const campaigns: Campaign[] = rows.map((r) => ({
+    id: r.id,
+    brand: r.brand_name || "브랜드 미정",
+    category: Array.isArray(r.category) && r.category.length ? r.category[0] : "기타",
+    channels: r.content_type ? [r.content_type] : [],
+    title: r.name,
+    product: r.product_name || "",
+    hashtags: (r.hashtags || "")
+      .split(/[\s,]+/)
+      .map((h: string) => h.trim())
+      .filter(Boolean),
+    applyEnd: r.timeline_apply_end ? new Date(r.timeline_apply_end).toISOString() : null,
+    section: r.hub_is_new ? "new" : "ongoing",
+  }));
+
+  return {
+    ongoing: campaigns.filter((c) => c.section === "ongoing"),
+    new: campaigns.filter((c) => c.section === "new"),
   };
-  db.applications.push(app);
-  writeDb(db);
-  return app;
 }
 
-export function getApplication(id: string): Application | null {
-  const db = readDb();
-  return db.applications.find((a) => a.id === id) || null;
+export async function listApplicationsForInfluencer(influencerId: string): Promise<Application[]> {
+  const { rows } = await adminDb().query(
+    `SELECT a.*, s.link AS content_url
+       FROM applications a
+       LEFT JOIN LATERAL (
+         SELECT link FROM submissions WHERE application_id = a.id ORDER BY submitted_at DESC LIMIT 1
+       ) s ON true
+      WHERE a.influencer_id = $1
+      ORDER BY a.created_at DESC`,
+    [influencerId]
+  );
+  return rows.map(mapApplicationRow);
 }
 
-export function submitContent(applicationId: string, contentUrl: string): Application | null {
-  const db = readDb();
-  const app = db.applications.find((a) => a.id === applicationId);
-  if (!app) return null;
-  app.contentUrl = contentUrl;
-  app.contentSubmittedAt = new Date().toISOString();
-  writeDb(db);
-  return app;
+export async function createApplication(influencerId: string, campaignId: string): Promise<Application> {
+  const db = adminDb();
+  const { rows: existing } = await db.query(
+    `SELECT * FROM applications WHERE influencer_id = $1 AND campaign_id = $2 LIMIT 1`,
+    [influencerId, campaignId]
+  );
+  if (existing.length) return mapApplicationRow(existing[0]);
+
+  const { rows } = await db.query(
+    `INSERT INTO applications (campaign_id, influencer_id, applicant_name, applicant_phone, applicant_handle)
+     SELECT $2, $1, name, phone, handle FROM influencers WHERE id = $1
+     RETURNING *`,
+    [influencerId, campaignId]
+  );
+  return mapApplicationRow(rows[0]);
 }
 
-/** 이 인플루언서가 이전에 제출한 정산정보(재사용용)가 있는지 — RRN은 마스킹 없이 서버 내부에서만 사용 */
-export function getSecureProfileSummary(
+export async function getApplication(id: string): Promise<Application | null> {
+  const { rows } = await adminDb().query(
+    `SELECT a.*, s.link AS content_url
+       FROM applications a
+       LEFT JOIN LATERAL (
+         SELECT link FROM submissions WHERE application_id = a.id ORDER BY submitted_at DESC LIMIT 1
+       ) s ON true
+      WHERE a.id = $1`,
+    [id]
+  );
+  if (!rows.length) return null;
+  return mapApplicationRow(rows[0]);
+}
+
+export async function submitContent(applicationId: string, contentUrl: string): Promise<Application | null> {
+  const db = adminDb();
+  const upd = await db.query(`UPDATE submissions SET link = $2, submitted_at = now() WHERE application_id = $1`, [
+    applicationId,
+    contentUrl,
+  ]);
+  if (upd.rowCount === 0) {
+    await db.query(`INSERT INTO submissions (application_id, link, submitted_at) VALUES ($1, $2, now())`, [
+      applicationId,
+      contentUrl,
+    ]);
+  }
+  await db.query(`UPDATE applications SET content_submitted_at = now() WHERE id = $1`, [applicationId]);
+  return getApplication(applicationId);
+}
+
+export async function getSecureProfileSummary(
   influencerId: string
-): { hasProfile: boolean; bankName?: string; maskedAccount?: string } {
-  const db = readDb();
-  const p = db.secureProfiles.find((s) => s.influencerId === influencerId);
-  if (!p) return { hasProfile: false };
-  const digits = p.bankAccount.replace(/\D/g, "");
+): Promise<{ hasProfile: boolean; bankName?: string; maskedAccount?: string }> {
+  const { rows } = await adminDb().query(
+    `SELECT bank_name, bank_account FROM influencers WHERE id = $1 AND bank_account IS NOT NULL AND bank_account <> ''`,
+    [influencerId]
+  );
+  if (!rows.length) return { hasProfile: false };
+  const digits = String(rows[0].bank_account).replace(/\D/g, "");
   return {
     hasProfile: true,
-    bankName: p.bankName,
+    bankName: rows[0].bank_name || undefined,
     maskedAccount: digits.length > 4 ? "•".repeat(digits.length - 4) + digits.slice(-4) : digits,
   };
 }
 
-export function submitSettlementNew(
+export async function submitSettlementNew(
   applicationId: string,
   influencerId: string,
   payload: { realName: string; phone: string; bankName: string; bankAccount: string; holder: string; rrn: string }
-): Application | null {
-  const db = readDb();
-  const app = db.applications.find((a) => a.id === applicationId);
-  if (!app) return null;
-
+): Promise<Application | null> {
+  const db = adminDb();
   const rrnEnc = encryptRRN(payload.rrn);
-  app.settleRealName = payload.realName;
-  app.settlePhone = payload.phone;
-  app.settleBankName = payload.bankName;
-  app.settleBankAccount = payload.bankAccount;
-  app.settleHolder = payload.holder;
-  app.settleRrn = rrnEnc;
-  app.settleSubmittedAt = new Date().toISOString();
 
-  const idx = db.secureProfiles.findIndex((s) => s.influencerId === influencerId);
-  const profile: SecureProfile = {
+  await db.query(
+    `UPDATE applications SET
+       settle_real_name = $2, settle_phone = $3, settle_bank_name = $4,
+       settle_bank_account = $5, settle_holder = $6, settle_rrn = $7, settle_submitted_at = now()
+     WHERE id = $1`,
+    [applicationId, payload.realName, payload.phone, payload.bankName, payload.bankAccount, payload.holder, rrnEnc]
+  );
+
+  // 인플루언서 프로필에도 저장 — 다음 캠페인부터 재사용 가능
+  await db.query(
+    `UPDATE influencers SET real_name = $2, phone = COALESCE(phone, $3), bank_name = $4, bank_account = $5, account_holder = $6
+     WHERE id = $1`,
+    [influencerId, payload.realName, payload.phone, payload.bankName, payload.bankAccount, payload.holder]
+  );
+  await db.query(
+    `INSERT INTO influencer_secure (influencer_id, rrn, updated_at) VALUES ($1, $2, now())
+     ON CONFLICT (influencer_id) DO UPDATE SET rrn = $2, updated_at = now()`,
+    [influencerId, rrnEnc]
+  );
+
+  return getApplication(applicationId);
+}
+
+export async function submitSettlementFromExistingProfile(
+  applicationId: string,
+  influencerId: string
+): Promise<Application | null> {
+  const db = adminDb();
+  const { rows: infRows } = await db.query(
+    `SELECT real_name, phone, bank_name, bank_account, account_holder FROM influencers WHERE id = $1`,
+    [influencerId]
+  );
+  const { rows: secRows } = await db.query(`SELECT rrn FROM influencer_secure WHERE influencer_id = $1`, [
     influencerId,
-    realName: payload.realName,
-    phone: payload.phone,
-    bankName: payload.bankName,
-    bankAccount: payload.bankAccount,
-    holder: payload.holder,
-    rrn: rrnEnc,
-    updatedAt: new Date().toISOString(),
-  };
-  if (idx >= 0) db.secureProfiles[idx] = profile;
-  else db.secureProfiles.push(profile);
+  ]);
+  if (!infRows.length || !infRows[0].bank_account) return null;
+  const inf = infRows[0];
+  const rrn = secRows[0]?.rrn ?? null;
 
-  writeDb(db);
-  return app;
+  await db.query(
+    `UPDATE applications SET
+       settle_real_name = $2, settle_phone = $3, settle_bank_name = $4,
+       settle_bank_account = $5, settle_holder = $6, settle_rrn = $7, settle_submitted_at = now()
+     WHERE id = $1`,
+    [applicationId, inf.real_name, inf.phone, inf.bank_name, inf.bank_account, inf.account_holder, rrn]
+  );
+
+  return getApplication(applicationId);
 }
-
-export function submitSettlementFromExistingProfile(applicationId: string, influencerId: string): Application | null {
-  const db = readDb();
-  const app = db.applications.find((a) => a.id === applicationId);
-  const profile = db.secureProfiles.find((s) => s.influencerId === influencerId);
-  if (!app || !profile) return null;
-
-  app.settleRealName = profile.realName;
-  app.settlePhone = profile.phone;
-  app.settleBankName = profile.bankName;
-  app.settleBankAccount = profile.bankAccount;
-  app.settleHolder = profile.holder;
-  app.settleRrn = profile.rrn;
-  app.settleSubmittedAt = new Date().toISOString();
-
-  writeDb(db);
-  return app;
-}
-
-// decryptRRN re-exported for potential future admin-facing views (not used client-side)
-export { decryptRRN };
