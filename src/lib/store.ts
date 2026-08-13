@@ -37,7 +37,7 @@ export type ApplicationStatus = "applied" | "selected" | "rejected";
 
 export type Application = {
   id: string;
-  influencerId: string;
+  influencerId: string | null;
   campaignId: string;
   status: ApplicationStatus;
   createdAt: string;
@@ -62,7 +62,7 @@ function toUiStatus(dbStatus: string): ApplicationStatus {
 function mapApplicationRow(r: Record<string, unknown>): Application {
   return {
     id: r.id as string,
-    influencerId: r.influencer_id as string,
+    influencerId: (r.influencer_id as string) ?? null,
     campaignId: r.campaign_id as string,
     status: toUiStatus(r.status as string),
     createdAt: (r.created_at as Date).toISOString(),
@@ -76,6 +76,30 @@ function mapApplicationRow(r: Record<string, unknown>): Application {
     settleHolder: (r.settle_holder as string) ?? null,
     settleRrn: (r.settle_rrn as string) ?? null,
   };
+}
+
+/** 전화번호로 기존 인플루언서 레코드를 찾아요 — 있으면 정산정보 재사용이 가능해져요. */
+async function findInfluencerIdByPhone(phone: string): Promise<string | null> {
+  if (!phone) return null;
+  const { rows } = await adminDb().query(`SELECT id FROM influencers WHERE phone = $1 LIMIT 1`, [phone]);
+  return rows[0]?.id ?? null;
+}
+
+/** 공개(코드 없이) 캠페인 신청 — 이름/연락처/인스타 핸들만으로 신청 접수 */
+export async function createPublicApplication(input: {
+  campaignId: string;
+  name: string;
+  phone: string;
+  handle: string;
+}): Promise<Application> {
+  const influencerId = await findInfluencerIdByPhone(input.phone);
+  const { rows } = await adminDb().query(
+    `INSERT INTO applications (campaign_id, influencer_id, applicant_name, applicant_phone, applicant_handle)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING *`,
+    [input.campaignId, influencerId, input.name, input.phone, input.handle.replace(/^@/, "")]
+  );
+  return mapApplicationRow(rows[0]);
 }
 
 export async function getInfluencerByCode(code: string): Promise<Influencer | null> {
@@ -188,8 +212,9 @@ export async function submitContent(applicationId: string, contentUrl: string): 
 }
 
 export async function getSecureProfileSummary(
-  influencerId: string
+  influencerId: string | null
 ): Promise<{ hasProfile: boolean; bankName?: string; maskedAccount?: string }> {
+  if (!influencerId) return { hasProfile: false };
   const { rows } = await adminDb().query(
     `SELECT bank_name, bank_account FROM influencers WHERE id = $1 AND bank_account IS NOT NULL AND bank_account <> ''`,
     [influencerId]
@@ -205,7 +230,7 @@ export async function getSecureProfileSummary(
 
 export async function submitSettlementNew(
   applicationId: string,
-  influencerId: string,
+  influencerId: string | null,
   payload: { realName: string; phone: string; bankName: string; bankAccount: string; holder: string; rrn: string }
 ): Promise<Application | null> {
   const db = adminDb();
@@ -219,25 +244,28 @@ export async function submitSettlementNew(
     [applicationId, payload.realName, payload.phone, payload.bankName, payload.bankAccount, payload.holder, rrnEnc]
   );
 
-  // 인플루언서 프로필에도 저장 — 다음 캠페인부터 재사용 가능
-  await db.query(
-    `UPDATE influencers SET real_name = $2, phone = COALESCE(phone, $3), bank_name = $4, bank_account = $5, account_holder = $6
-     WHERE id = $1`,
-    [influencerId, payload.realName, payload.phone, payload.bankName, payload.bankAccount, payload.holder]
-  );
-  await db.query(
-    `INSERT INTO influencer_secure (influencer_id, rrn, updated_at) VALUES ($1, $2, now())
-     ON CONFLICT (influencer_id) DO UPDATE SET rrn = $2, updated_at = now()`,
-    [influencerId, rrnEnc]
-  );
+  // influencer_id가 연결된 경우에만 프로필에도 저장 — 다음 캠페인부터 재사용 가능
+  if (influencerId) {
+    await db.query(
+      `UPDATE influencers SET real_name = $2, phone = COALESCE(phone, $3), bank_name = $4, bank_account = $5, account_holder = $6
+       WHERE id = $1`,
+      [influencerId, payload.realName, payload.phone, payload.bankName, payload.bankAccount, payload.holder]
+    );
+    await db.query(
+      `INSERT INTO influencer_secure (influencer_id, rrn, updated_at) VALUES ($1, $2, now())
+       ON CONFLICT (influencer_id) DO UPDATE SET rrn = $2, updated_at = now()`,
+      [influencerId, rrnEnc]
+    );
+  }
 
   return getApplication(applicationId);
 }
 
 export async function submitSettlementFromExistingProfile(
   applicationId: string,
-  influencerId: string
+  influencerId: string | null
 ): Promise<Application | null> {
+  if (!influencerId) return null;
   const db = adminDb();
   const { rows: infRows } = await db.query(
     `SELECT real_name, phone, bank_name, bank_account, account_holder FROM influencers WHERE id = $1`,

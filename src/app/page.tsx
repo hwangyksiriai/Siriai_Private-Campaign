@@ -1,5 +1,6 @@
 import Header from "@/components/Header";
 import Hero from "@/components/Hero";
+import PublicCampaigns from "@/components/PublicCampaigns";
 import BrandMarquee from "@/components/BrandMarquee";
 import About from "@/components/About";
 import HowItWorks from "@/components/HowItWorks";
@@ -11,6 +12,7 @@ export default function Home() {
       <Header />
       <main className="flex-1">
         <Hero />
+        <PublicCampaigns />
         <BrandMarquee />
         <About />
         <HowItWorks />

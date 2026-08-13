@@ -1,0 +1,68 @@
+import { NextRequest, NextResponse } from "next/server";
+import {
+  getApplication,
+  submitContent,
+  submitSettlementNew,
+  submitSettlementFromExistingProfile,
+} from "@/lib/store";
+
+export const runtime = "nodejs";
+
+const clean = (v: unknown) => String(v ?? "").trim();
+const digits = (v: unknown) => clean(v).replace(/[^0-9]/g, "");
+
+export async function POST(req: NextRequest) {
+  const body = await req.json().catch(() => ({}));
+  const applicationId = String(body.applicationId || "");
+  const application = await getApplication(applicationId);
+  if (!application) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  if (body.type === "content") {
+    const contentUrl = clean(body.contentUrl);
+    if (!/^https?:\/\//i.test(contentUrl)) {
+      return NextResponse.json({ error: "콘텐츠 링크는 http로 시작하는 전체 주소로 입력해 주세요" }, { status: 400 });
+    }
+    const updated = await submitContent(applicationId, contentUrl);
+    return NextResponse.json({ ok: true, application: updated });
+  }
+
+  if (body.type === "settlement_reuse") {
+    const updated = await submitSettlementFromExistingProfile(applicationId, application.influencerId);
+    if (!updated) return NextResponse.json({ error: "재사용할 정산 정보가 없어요" }, { status: 400 });
+    return NextResponse.json({ ok: true, application: updated });
+  }
+
+  if (body.type === "settlement_new") {
+    const realName = clean(body.realName);
+    const phone = clean(body.phone);
+    const bankName = clean(body.bankName);
+    const bankAccount = digits(body.bankAccount);
+    const holder = clean(body.holder);
+    const rrn = digits(body.rrn);
+    const agreed = !!body.agreed;
+
+    if (!realName || !phone || !bankName || !bankAccount || !holder || !rrn) {
+      return NextResponse.json({ error: "모든 항목을 입력해 주세요" }, { status: 400 });
+    }
+    if (rrn.length !== 13) {
+      return NextResponse.json({ error: "주민등록번호는 13자리 숫자로 입력해 주세요" }, { status: 400 });
+    }
+    if (!agreed) {
+      return NextResponse.json({ error: "정산정보 수집·이용 동의가 필요해요" }, { status: 400 });
+    }
+
+    const updated = await submitSettlementNew(applicationId, application.influencerId, {
+      realName,
+      phone,
+      bankName,
+      bankAccount,
+      holder,
+      rrn,
+    });
+    return NextResponse.json({ ok: true, application: updated });
+  }
+
+  return NextResponse.json({ error: "unknown type" }, { status: 400 });
+}

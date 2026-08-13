@@ -7,6 +7,9 @@ export default function Header() {
         </a>
 
         <nav className="hidden items-center gap-8 text-sm text-[var(--ink-soft)] md:flex">
+          <a href="#campaigns" className="link-underline">
+            캠페인
+          </a>
           <a href="#about" className="link-underline">
             소개
           </a>
@@ -23,9 +26,12 @@ export default function Header() {
           </a>
         </nav>
 
-        <span className="rounded-full border border-[var(--line)] px-3 py-1 text-[11px] tracking-[0.1em] text-[var(--ink-faint)] uppercase">
-          Private Access
-        </span>
+        <a
+          href="#campaigns"
+          className="rounded-full bg-[var(--ink)] px-5 py-2.5 text-sm font-medium text-[var(--paper)] transition-transform duration-300 hover:-translate-y-0.5 hover:bg-[var(--accent)]"
+        >
+          캠페인 신청하기
+        </a>
       </div>
     </header>
   );

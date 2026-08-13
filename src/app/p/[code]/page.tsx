@@ -134,7 +134,7 @@ export default function PortalPage() {
             {selectedApps.map((app) => (
               <ApplicationPanel
                 key={app.id}
-                code={code}
+                submitUrl={`/api/portal/${code}/submit`}
                 application={app}
                 campaign={campaignById.get(app.campaignId)}
                 secureProfile={data.secureProfile}
@@ -144,7 +144,7 @@ export default function PortalPage() {
             {otherApps.map((app) => (
               <ApplicationPanel
                 key={app.id}
-                code={code}
+                submitUrl={`/api/portal/${code}/submit`}
                 application={app}
                 campaign={campaignById.get(app.campaignId)}
                 secureProfile={data.secureProfile}

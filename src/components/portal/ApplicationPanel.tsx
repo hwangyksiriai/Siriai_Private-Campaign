@@ -18,17 +18,20 @@ const STATUS_STYLE: Record<Application["status"], string> = {
 type SecureProfile = { hasProfile: boolean; bankName?: string; maskedAccount?: string };
 
 export default function ApplicationPanel({
-  code,
+  submitUrl,
   application,
   campaign,
   secureProfile,
   onUpdated,
+  forceShowForms = false,
 }: {
-  code: string;
+  submitUrl: string;
   application: Application;
   campaign: Campaign | undefined;
   secureProfile: SecureProfile;
   onUpdated: (app: Application) => void;
+  /** 데모/공개 플로우용 — 관리자 선정 여부와 상관없이 콘텐츠·정산 폼을 바로 보여줘요 */
+  forceShowForms?: boolean;
 }) {
   const [contentUrl, setContentUrl] = useState(application.contentUrl || "");
   const [savingContent, setSavingContent] = useState(false);
@@ -48,7 +51,7 @@ export default function ApplicationPanel({
   });
 
   async function submit(body: Record<string, unknown>) {
-    const r = await fetch(`/api/portal/${code}/submit`, {
+    const r = await fetch(submitUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ applicationId: application.id, ...body }),
@@ -133,7 +136,7 @@ export default function ApplicationPanel({
         </p>
       )}
 
-      {application.status === "selected" && (
+      {(forceShowForms || application.status === "selected") && (
         <div className="space-y-5 border-t border-[var(--line)] pt-5">
           {/* 1. 콘텐츠 링크 */}
           <div>
