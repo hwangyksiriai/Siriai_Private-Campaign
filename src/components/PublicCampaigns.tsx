@@ -62,6 +62,7 @@ export default function PublicCampaigns() {
   }
 
   const appliedCampaignId = result?.application.campaignId;
+  const allCampaigns = [...campaigns.ongoing, ...campaigns.new];
 
   return (
     <section id="campaigns" className="px-6 py-28 lg:px-10">
@@ -84,38 +85,7 @@ export default function PublicCampaigns() {
           </div>
         )}
 
-        {campaigns.ongoing.length > 0 && (
-          <div className="mb-16">
-            <h3 className="font-display mb-5 text-2xl text-[var(--ink)]">진행 중인 캠페인</h3>
-            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-              {campaigns.ongoing.map((c) => (
-                <div key={c.id}>
-                  <CampaignCard
-                    campaign={c}
-                    applied={appliedCampaignId === c.id}
-                    applying={false}
-                    onApply={() => {
-                      setFormForCampaign(c);
-                      setError("");
-                    }}
-                  />
-                  {formForCampaign?.id === c.id && (
-                    <ApplyForm
-                      form={form}
-                      setForm={setForm}
-                      error={error}
-                      submitting={submitting}
-                      onSubmit={() => handleApply(c.id)}
-                      onCancel={() => setFormForCampaign(null)}
-                    />
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {campaigns.new.length > 0 && (
+        {allCampaigns.length > 0 ? (
           <div>
             <div className="mb-5 flex items-center gap-3">
               <h3 className="font-display text-2xl text-[var(--ink)]">신규 캠페인</h3>
@@ -124,7 +94,7 @@ export default function PublicCampaigns() {
               </span>
             </div>
             <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-              {campaigns.new.map((c) => (
+              {allCampaigns.map((c) => (
                 <div key={c.id}>
                   <CampaignCard
                     campaign={c}
@@ -149,9 +119,7 @@ export default function PublicCampaigns() {
               ))}
             </div>
           </div>
-        )}
-
-        {campaigns.ongoing.length === 0 && campaigns.new.length === 0 && (
+        ) : (
           <p className="text-sm text-[var(--ink-faint)]">지금은 모집 중인 캠페인이 없어요.</p>
         )}
       </div>
