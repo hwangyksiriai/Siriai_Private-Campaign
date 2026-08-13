@@ -20,7 +20,10 @@ export default function CampaignCard({
   const expired = dday !== null && dday < 0;
 
   return (
-    <article className="flex flex-col justify-between rounded-3xl border border-[var(--line)] bg-[var(--paper)] p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_20px_40px_-24px_rgba(38,34,28,0.2)]">
+    <article
+      onClick={onApply}
+      className="flex cursor-pointer flex-col justify-between rounded-3xl border border-[var(--line)] bg-[var(--paper)] p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_20px_40px_-24px_rgba(38,34,28,0.2)]"
+    >
       <div>
         <div className="mb-4 flex items-center justify-between">
           <span className="rounded-full border border-[var(--accent)]/40 bg-[var(--accent)]/8 px-3 py-1 text-xs font-medium text-[var(--accent)]">
@@ -52,7 +55,10 @@ export default function CampaignCard({
           {dday === null ? "상시 모집" : expired ? "신청이 마감되었습니다" : `신청 마감 D-${dday}`}
         </span>
         <button
-          onClick={onApply}
+          onClick={(e) => {
+            e.stopPropagation();
+            onApply();
+          }}
           disabled={applied || applying || expired}
           className="rounded-full bg-[var(--ink)] px-4 py-2 text-xs font-medium text-[var(--paper)] transition-colors duration-300 hover:bg-[var(--accent)] disabled:cursor-not-allowed disabled:bg-[var(--ink-soft)]/40"
         >

@@ -14,9 +14,13 @@ import { encryptRRN } from "./rrnCrypto";
 
 export type CampaignSection = "ongoing" | "new";
 
+export type CampaignProduct = { name: string; link: string; photoUrl: string };
+
 export type Campaign = {
   id: string;
   brand: string;
+  brandLogoUrl: string | null;
+  brandDescription: string | null;
   category: string;
   channels: string[];
   title: string;
@@ -24,6 +28,22 @@ export type Campaign = {
   hashtags: string[];
   applyEnd: string | null;
   section: CampaignSection;
+  feeAmount: number | null;
+  productValue: number | null;
+  collabRequired: boolean;
+  secondUseRequired: boolean;
+  targetRecruitCount: number | null;
+  uploadStart: string | null;
+  uploadEnd: string | null;
+  timelineSelectionDate: string | null;
+  timelineShippingDate: string | null;
+  products: CampaignProduct[];
+  guideFileUrl: string | null;
+  guideMust: string | null;
+  guideForbidden: string | null;
+  guideRecommended: string | null;
+  collabHandles: string[];
+  captionMust: string | null;
 };
 
 export type Influencer = {
@@ -85,19 +105,47 @@ async function findInfluencerIdByPhone(phone: string): Promise<string | null> {
   return rows[0]?.id ?? null;
 }
 
-/** 공개(코드 없이) 캠페인 신청 — 이름/연락처/인스타 핸들만으로 신청 접수 */
+/** "@handle", "instagram.com/handle", 순수 핸들 등 다양한 입력에서 핸들만 추출 */
+function handleOf(input: string): string {
+  const m = (input || "").match(/instagram\.com\/([^/?\s]+)/i);
+  return (m ? m[1] : input || "").replace(/^@/, "").replace(/\/$/, "").trim();
+}
+
+/** 공개(코드 없이) 캠페인 신청 — 배송지·요청사항까지 받는 전체 신청서 */
 export async function createPublicApplication(input: {
   campaignId: string;
   name: string;
   phone: string;
-  handle: string;
+  instagramLink: string;
+  email?: string;
+  postalCode?: string;
+  address: string;
+  addressDetail?: string;
+  request?: string;
 }): Promise<Application> {
   const influencerId = await findInfluencerIdByPhone(input.phone);
+  const extraParts = [
+    input.email ? `이메일: ${input.email}` : null,
+    input.postalCode ? `우편번호: ${input.postalCode}` : null,
+  ].filter(Boolean);
+
   const { rows } = await adminDb().query(
-    `INSERT INTO applications (campaign_id, influencer_id, applicant_name, applicant_phone, applicant_handle)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO applications
+       (campaign_id, influencer_id, applicant_name, applicant_phone, applicant_handle,
+        address, address_detail, request, applicant_extra, agreed)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
      RETURNING *`,
-    [input.campaignId, influencerId, input.name, input.phone, input.handle.replace(/^@/, "")]
+    [
+      input.campaignId,
+      influencerId,
+      input.name,
+      input.phone,
+      handleOf(input.instagramLink),
+      input.address,
+      input.addressDetail || null,
+      input.request || null,
+      extraParts.join(" · ") || null,
+    ]
   );
   return mapApplicationRow(rows[0]);
 }
@@ -122,7 +170,11 @@ export async function logAccess(influencerId: string, code: string): Promise<voi
 export async function listCampaigns(): Promise<{ ongoing: Campaign[]; new: Campaign[] }> {
   const { rows } = await adminDb().query(`
     SELECT c.id, c.name, c.content_type, c.category, c.hashtags, c.product_name,
-           c.timeline_apply_end, c.hub_is_new, b.name AS brand_name
+           c.timeline_apply_end, c.hub_is_new, b.name AS brand_name, b.logo_url AS brand_logo_url,
+           c.brand_description, c.fee_amount, c.product_value, c.collab_required, c.second_use_required,
+           c.target_recruit_count, c.upload_start, c.upload_end, c.timeline_selection_date,
+           c.timeline_shipping_date, c.products, c.guide_file_url, c.guide_must, c.guide_forbidden,
+           c.guide_recommended, c.collab_handles, c.caption_must
       FROM campaigns c
       LEFT JOIN brands b ON b.id = c.brand_id
      WHERE c.hub_visible = true
@@ -132,6 +184,8 @@ export async function listCampaigns(): Promise<{ ongoing: Campaign[]; new: Campa
   const campaigns: Campaign[] = rows.map((r) => ({
     id: r.id,
     brand: r.brand_name || "브랜드 미정",
+    brandLogoUrl: r.brand_logo_url || null,
+    brandDescription: r.brand_description || null,
     category: Array.isArray(r.category) && r.category.length ? r.category[0] : "기타",
     channels: r.content_type ? [r.content_type] : [],
     title: r.name,
@@ -142,6 +196,28 @@ export async function listCampaigns(): Promise<{ ongoing: Campaign[]; new: Campa
       .filter(Boolean),
     applyEnd: r.timeline_apply_end ? new Date(r.timeline_apply_end).toISOString() : null,
     section: r.hub_is_new ? "new" : "ongoing",
+    feeAmount: r.fee_amount ?? null,
+    productValue: r.product_value ?? null,
+    collabRequired: !!r.collab_required,
+    secondUseRequired: !!r.second_use_required,
+    targetRecruitCount: r.target_recruit_count ?? null,
+    uploadStart: r.upload_start ? new Date(r.upload_start).toISOString() : null,
+    uploadEnd: r.upload_end ? new Date(r.upload_end).toISOString() : null,
+    timelineSelectionDate: r.timeline_selection_date ? new Date(r.timeline_selection_date).toISOString() : null,
+    timelineShippingDate: r.timeline_shipping_date ? new Date(r.timeline_shipping_date).toISOString() : null,
+    products: Array.isArray(r.products)
+      ? r.products.map((p: Record<string, string>) => ({
+          name: p.name || "",
+          link: p.link || "",
+          photoUrl: p.photo_url || "",
+        }))
+      : [],
+    guideFileUrl: r.guide_file_url || null,
+    guideMust: r.guide_must || null,
+    guideForbidden: r.guide_forbidden || null,
+    guideRecommended: r.guide_recommended || null,
+    collabHandles: Array.isArray(r.collab_handles) ? r.collab_handles : [],
+    captionMust: r.caption_must || null,
   }));
 
   return {
