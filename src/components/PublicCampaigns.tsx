@@ -1,27 +1,60 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import CampaignCard from "@/components/portal/CampaignCard";
 import ApplicationPanel from "@/components/portal/ApplicationPanel";
 import CampaignModal from "@/components/CampaignModal";
 import type { Campaign, Application } from "@/lib/store";
 
 type SecureProfile = { hasProfile: boolean; bankName?: string; maskedAccount?: string };
+type LookupApplication = Application & { campaignTitle: string; campaignBrand: string };
 
 export default function PublicCampaigns() {
   const [campaigns, setCampaigns] = useState<{ ongoing: Campaign[]; new: Campaign[] } | null>(null);
   const [modalCampaign, setModalCampaign] = useState<Campaign | null>(null);
-  const [result, setResult] = useState<{
-    application: Application;
-    campaign: Campaign;
-    secureProfile: SecureProfile;
-  } | null>(null);
+  const [appliedCampaignId, setAppliedCampaignId] = useState<string | null>(null);
+
+  const [lookupPhone, setLookupPhone] = useState("");
+  const [lookupApps, setLookupApps] = useState<LookupApplication[] | null>(null);
+  const [lookupSecureProfile, setLookupSecureProfile] = useState<SecureProfile>({ hasProfile: false });
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupError, setLookupError] = useState("");
 
   useEffect(() => {
     fetch("/api/public/campaigns")
       .then((r) => r.json())
       .then((d) => setCampaigns(d.campaigns));
   }, []);
+
+  const runLookup = useCallback(async (phone: string) => {
+    setLookupError("");
+    if (!phone.trim()) {
+      setLookupError("연락처를 입력해 주세요");
+      return;
+    }
+    setLookupLoading(true);
+    try {
+      const r = await fetch(`/api/public/applications?phone=${encodeURIComponent(phone.trim())}`);
+      const d = await r.json();
+      if (!r.ok) {
+        setLookupError(d.error || "조회에 실패했어요");
+        return;
+      }
+      if (!d.applications.length) {
+        setLookupError("이 연락처로 신청한 내역이 없어요");
+        setLookupApps(null);
+        return;
+      }
+      setLookupApps(d.applications);
+      setLookupSecureProfile(d.secureProfile);
+    } finally {
+      setLookupLoading(false);
+    }
+  }, []);
+
+  function updateLookupApp(updated: Application) {
+    setLookupApps((prev) => (prev ? prev.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)) : prev));
+  }
 
   if (!campaigns) {
     return (
@@ -31,27 +64,58 @@ export default function PublicCampaigns() {
     );
   }
 
-  const appliedCampaignId = result?.application.campaignId;
   const allCampaigns = [...campaigns.ongoing, ...campaigns.new];
 
   return (
     <section id="campaigns" className="px-6 py-28 lg:px-10">
       <div className="mx-auto max-w-7xl">
-        <p className="mb-3 text-xs tracking-[0.25em] text-[var(--accent)] uppercase">Open Campaigns</p>
-        <h2 className="font-display mb-14 text-4xl text-[var(--ink)] sm:text-5xl">
-          지금 신청할 수 있는 캠페인
-        </h2>
+        <div className="mb-14 flex flex-wrap items-end justify-between gap-6">
+          <div>
+            <p className="mb-3 text-xs tracking-[0.25em] text-[var(--accent)] uppercase">Open Campaigns</p>
+            <h2 className="font-display text-4xl text-[var(--ink)] sm:text-5xl">지금 신청할 수 있는 캠페인</h2>
+          </div>
 
-        {result && (
+          <div className="w-full max-w-xs">
+            <p className="mb-1.5 text-xs font-medium text-[var(--ink-soft)]">이미 신청하셨나요? 내 신청 현황 조회</p>
+            <div className="flex gap-2">
+              <input
+                value={lookupPhone}
+                onChange={(e) => {
+                  setLookupPhone(e.target.value);
+                  if (lookupError) setLookupError("");
+                }}
+                onKeyDown={(e) => e.key === "Enter" && runLookup(lookupPhone)}
+                placeholder="신청하신 연락처"
+                className="flex-1 rounded-full border border-[var(--line)] bg-white px-4 py-2 text-sm text-[var(--ink)] outline-none focus:border-[var(--accent)]"
+              />
+              <button
+                onClick={() => runLookup(lookupPhone)}
+                disabled={lookupLoading}
+                className="shrink-0 rounded-full bg-[var(--ink)] px-4 py-2 text-xs font-medium text-white hover:bg-[var(--accent)] disabled:opacity-50"
+              >
+                {lookupLoading ? "조회 중…" : "조회"}
+              </button>
+            </div>
+            {lookupError && <p className="mt-1.5 text-xs text-red-500">{lookupError}</p>}
+          </div>
+        </div>
+
+        {lookupApps && (
           <div className="mb-12">
-            <ApplicationPanel
-              submitUrl="/api/public/submit"
-              application={result.application}
-              campaign={result.campaign}
-              secureProfile={result.secureProfile}
-              forceShowForms
-              onUpdated={(updated) => setResult((prev) => (prev ? { ...prev, application: updated } : prev))}
-            />
+            <h3 className="font-display mb-5 text-2xl text-[var(--ink)]">내 신청 현황</h3>
+            <div className="space-y-4">
+              {lookupApps.map((app) => (
+                <ApplicationPanel
+                  key={app.id}
+                  submitUrl="/api/public/submit"
+                  application={app}
+                  campaign={{ title: app.campaignTitle, brand: app.campaignBrand, product: "" }}
+                  secureProfile={lookupSecureProfile}
+                  forceShowForms
+                  onUpdated={updateLookupApp}
+                />
+              ))}
+            </div>
           </div>
         )}
 
@@ -84,9 +148,11 @@ export default function PublicCampaigns() {
         <CampaignModal
           campaign={modalCampaign}
           onClose={() => setModalCampaign(null)}
-          onApplied={({ application, secureProfile }) =>
-            setResult({ application, campaign: modalCampaign, secureProfile })
-          }
+          onApplied={({ phone }) => {
+            setAppliedCampaignId(modalCampaign.id);
+            setLookupPhone(phone);
+            runLookup(phone);
+          }}
         />
       )}
     </section>

@@ -240,6 +240,29 @@ export async function listApplicationsForInfluencer(influencerId: string): Promi
   return rows.map(mapApplicationRow);
 }
 
+/** 코드 없이도 전화번호로 본인 신청 현황을 다시 조회할 수 있게 */
+export async function listApplicationsByPhone(
+  phone: string
+): Promise<Array<Application & { campaignTitle: string; campaignBrand: string }>> {
+  const { rows } = await adminDb().query(
+    `SELECT a.*, s.link AS content_url, c.name AS campaign_title, b.name AS brand_name
+       FROM applications a
+       LEFT JOIN campaigns c ON c.id = a.campaign_id
+       LEFT JOIN brands b ON b.id = c.brand_id
+       LEFT JOIN LATERAL (
+         SELECT link FROM submissions WHERE application_id = a.id ORDER BY submitted_at DESC LIMIT 1
+       ) s ON true
+      WHERE a.applicant_phone = $1
+      ORDER BY a.created_at DESC`,
+    [phone.trim()]
+  );
+  return rows.map((r) => ({
+    ...mapApplicationRow(r),
+    campaignTitle: r.campaign_title || "캠페인",
+    campaignBrand: r.brand_name || "",
+  }));
+}
+
 export async function createApplication(influencerId: string, campaignId: string): Promise<Application> {
   const db = adminDb();
   const { rows: existing } = await db.query(

@@ -3,6 +3,8 @@
 import { useState } from "react";
 import type { Application, Campaign } from "@/lib/store";
 
+type CampaignSummary = Pick<Campaign, "title" | "brand" | "product">;
+
 const STATUS_LABEL: Record<Application["status"], string> = {
   applied: "신청완료 · 검토중",
   selected: "선정되었어요 🎉",
@@ -27,7 +29,7 @@ export default function ApplicationPanel({
 }: {
   submitUrl: string;
   application: Application;
-  campaign: Campaign | undefined;
+  campaign: CampaignSummary | undefined;
   secureProfile: SecureProfile;
   onUpdated: (app: Application) => void;
   /** 데모/공개 플로우용 — 관리자 선정 여부와 상관없이 콘텐츠·정산 폼을 바로 보여줘요 */

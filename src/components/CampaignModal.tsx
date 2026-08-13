@@ -29,7 +29,7 @@ export default function CampaignModal({
 }: {
   campaign: Campaign;
   onClose: () => void;
-  onApplied: (result: { application: Application; secureProfile: SecureProfile }) => void;
+  onApplied: (result: { application: Application; secureProfile: SecureProfile; phone: string }) => void;
 }) {
   const [step, setStep] = useState<"detail" | "apply">("detail");
   const [copied, setCopied] = useState<string | null>(null);
@@ -95,7 +95,7 @@ export default function CampaignModal({
         setError(d.error || "신청에 실패했어요");
         return;
       }
-      onApplied({ application: d.application, secureProfile: d.secureProfile });
+      onApplied({ application: d.application, secureProfile: d.secureProfile, phone: form.phone.trim() });
       onClose();
     } finally {
       setSubmitting(false);
