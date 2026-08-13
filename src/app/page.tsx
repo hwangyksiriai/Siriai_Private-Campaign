@@ -12,10 +12,10 @@ export default function Home() {
       <Header />
       <main className="flex-1">
         <Hero />
-        <PublicCampaigns />
         <BrandMarquee />
         <About />
         <HowItWorks />
+        <PublicCampaigns />
       </main>
       <Footer />
     </>
