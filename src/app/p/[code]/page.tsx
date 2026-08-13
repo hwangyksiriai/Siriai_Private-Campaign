@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import CampaignCard from "@/components/portal/CampaignCard";
 import ApplicationPanel from "@/components/portal/ApplicationPanel";
+import PortalSplash from "@/components/portal/PortalSplash";
 import type { Campaign, Application } from "@/lib/store";
 
 type PortalData = {
@@ -98,6 +99,8 @@ export default function PortalPage() {
 
   return (
     <main className="min-h-screen bg-white">
+      <PortalSplash />
+
       {/* header */}
       <header className="border-b border-[var(--line)] bg-white/85 backdrop-blur-md">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
